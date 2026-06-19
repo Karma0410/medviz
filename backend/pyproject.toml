@@ -1,0 +1,14 @@
+[project]
+name = "medviz-backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.22.0",
+    "python-multipart>=0.0.6",
+    "nibabel>=5.1.0",
+    "numpy>=1.22.0",
+    "redis>=8.0.0",
+]

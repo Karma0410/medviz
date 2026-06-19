@@ -17,8 +17,7 @@ RUN uv sync --frozen
 ENV PATH="/app/.venv/bin:$PATH"
 
 COPY --chown=api_user:api_user main.py ./
-COPY --chown=api_user:api_user openapi.yaml ./
-COPY --chown=api_user:api_user modules ./modules
+COPY --chown=api_user:api_user src ./src
 
 EXPOSE 8000
 
