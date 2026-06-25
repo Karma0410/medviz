@@ -11,4 +11,7 @@ dependencies = [
     "nibabel>=5.1.0",
     "numpy>=1.22.0",
     "redis>=8.0.0",
+    "sqlmodel>=0.0.38",
+    "pytest>=9.1.1",
+    "psycopg[binary]>=3.3.4",
 ]
