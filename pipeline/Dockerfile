@@ -19,6 +19,6 @@ RUN uv sync --frozen
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-COPY --chown=worker_user:worker_user . .
+COPY --chown=worker_user:worker_user worker ./worker
 
 CMD ["python", "-m", "worker.main"]

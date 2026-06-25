@@ -6,9 +6,11 @@ import NiivueViewer, { SliceType, DragMode } from './NiivueViewer';
 import * as Select from '@radix-ui/react-select';
 import { Brain, FileText, HelpCircle, Upload, Download, Info, Activity, ChevronDown, Languages } from 'lucide-react';
 
+
 import { Language, translations } from './translations';
 
-const API_BASE_URL = 'http://localhost/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+console.log(API_BASE_URL);
 
 export default function App() {
   const [showImportModal, setShowImportModal] = useState(false);
@@ -441,6 +443,7 @@ export default function App() {
                 {selectedFileObj || mriUrl ? (
                   <NiivueViewer 
                     file={selectedFileObj} 
+                    fileName={selectedFile}
                     mriUrl={mriUrl}
                     maskUrl={maskUrl}
                     sliceType={sliceType} 

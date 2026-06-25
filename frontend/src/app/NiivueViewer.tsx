@@ -6,6 +6,7 @@ export type DragMode = 'contrast' | 'measurement' | 'pan' | 'zoom' | 'none';
 
 interface NiivueViewerProps {
   file?: File | null;
+  fileName?: string | null;
   mriUrl?: string | null;
   maskUrl?: string | null;
   className?: string;
@@ -17,6 +18,7 @@ interface NiivueViewerProps {
 
 export default function NiivueViewer({ 
   file,
+  fileName,
   mriUrl,
   maskUrl,
   className, 
@@ -61,12 +63,17 @@ export default function NiivueViewer({
         }
 
         if (primaryUrl) {
-          volumesToLoad.push({ url: primaryUrl });
+          const fallbackName = fileName ? fileName : 'volume.nii.gz';
+          volumesToLoad.push({ 
+            url: primaryUrl,
+            name: file ? file.name : fallbackName
+          });
         }
 
         if (maskUrl) {
           volumesToLoad.push({
             url: maskUrl,
+            name: 'mask.nii.gz',
             colormap: 'red',
             opacity: 0.65,
             cal_min: 0.5,

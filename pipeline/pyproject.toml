@@ -1,0 +1,13 @@
+[project]
+name = "medviz-worker"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "redis==8.0.0",
+    "nibabel>=5.1.0",
+    "numpy>=1.22.0",
+    "scipy>=1.9.0",
+    "SimpleITK>=2.2.0",
+]
