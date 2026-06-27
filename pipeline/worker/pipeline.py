@@ -183,7 +183,7 @@ def register_to_mni(
     patient_nib: nib.Nifti1Image,
     atlas_ref_nib: nib.Nifti1Image,
     mni_nib: nib.Nifti1Image,
-) -> np.ndarray:
+) -> tuple[np.ndarray, tuple]:
     from nibabel.processing import resample_from_to as nib_resample_from_to
 
     patient_zooms = [float(v) for v in patient_nib.header.get_zooms()[:3]]
@@ -193,7 +193,7 @@ def register_to_mni(
         patient_norm_nib = nib.Nifti1Image(patient_norm, patient_nib.affine)
         resampled_nib = nib_resample_from_to(patient_norm_nib, atlas_ref_nib,
                                               order=1, cval=0.0)
-        return resampled_nib.get_fdata(dtype=np.float32)
+        return resampled_nib.get_fdata(dtype=np.float32), ("nib", atlas_ref_nib)
 
     mni_data = mni_nib.get_fdata(dtype=np.float32)
     mni_norm = (mni_data - mni_data.min()) / (mni_data.max() - mni_data.min() + 1e-8)
@@ -208,7 +208,34 @@ def register_to_mni(
         moving, fixed, transform,
         sitk.sitkLinear, 0.0, moving.GetPixelID(),
     )
-    return _sitk_to_arr(resampled)
+    return _sitk_to_arr(resampled), ("sitk", transform)
+
+
+def export_mask(
+    mni_space_mask: np.ndarray,
+    inverse_info: tuple,
+    patient_nib: nib.Nifti1Image,
+    mni_nib: nib.Nifti1Image,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Retourne (data, affine) du masque de segmentation.
+
+    Pour les fichiers déjà prétraités (recalage MNI 2mm header-based), le
+    masque est ramené à la grille native du patient (affine exacte, fiable).
+    Pour les IRM brutes (recalage affine global), inverser ce recalage pour
+    une structure aussi petite que l'hippocampe s'est révélé peu fiable
+    (essais de recalage local instables) — le masque est donc fourni en
+    espace MNI, pas superposable directement à l'IRM brute d'origine.
+    """
+    kind, payload = inverse_info
+
+    if kind == "nib":
+        from nibabel.processing import resample_from_to as nib_resample_from_to
+        atlas_ref_nib = payload
+        mask_nib = nib.Nifti1Image(mni_space_mask.astype(np.float32), atlas_ref_nib.affine)
+        native_nib = nib_resample_from_to(mask_nib, patient_nib, order=0, cval=0.0)
+        return np.round(native_nib.get_fdata()).astype(np.uint8), patient_nib.affine
+
+    return mni_space_mask, mni_nib.affine
 
 
 def apply_atlas(
@@ -327,10 +354,11 @@ def hausdorff_distance_95(pred: np.ndarray, ref: np.ndarray, voxel_zooms: tuple)
 def run_segmentation_pipeline(
     mri_path: str,
     already_preprocessed: bool | None = None,
+    mask_output_path: str | None = None,
 ) -> dict:
     _check_atlas_files()
 
-    logger.info("[1/7] Chargement des fichiers NIfTI")
+    logger.info("[1/8] Chargement des fichiers NIfTI")
     patient_nib = _load(mri_path)
     atlas_L_nib = _load(ATLAS_L)
     atlas_R_nib = _load(ATLAS_R)
@@ -343,7 +371,7 @@ def run_segmentation_pipeline(
         patient_nib.shape, *patient_zooms, raw.min(), raw.max(),
     )
 
-    logger.info("[2/7] Prétraitement")
+    logger.info("[2/8] Prétraitement")
     if already_preprocessed is None:
         already_preprocessed = "normalised" in Path(mri_path).name
     if already_preprocessed:
@@ -354,11 +382,11 @@ def run_segmentation_pipeline(
     brain_volume_cm3 = compute_volume_cm3(brain_mask, tuple(patient_zooms))
     logger.info("  volume cérébral total : %.1f cm³", brain_volume_cm3)
 
-    logger.info("[3/7] Recalage affine → espace MNI  (quelques minutes…)")
-    patient_registered = register_to_mni(patient_norm, patient_nib, atlas_L_nib, mni_nib)
+    logger.info("[3/8] Recalage affine → espace MNI  (quelques minutes…)")
+    patient_registered, inverse_info = register_to_mni(patient_norm, patient_nib, atlas_L_nib, mni_nib)
     logger.info("  shape recalée : %s", patient_registered.shape)
 
-    logger.info("[4/7] Application de l'atlas HarP")
+    logger.info("[4/8] Application de l'atlas HarP")
     atlas_L_data = atlas_L_nib.get_fdata(dtype=np.float32)
     atlas_R_data = atlas_R_nib.get_fdata(dtype=np.float32)
     atlas_zooms = tuple(float(v) for v in atlas_L_nib.header.get_zooms()[:3])
@@ -367,7 +395,7 @@ def run_segmentation_pipeline(
     roi_R, atlas_mask_R, slices_R = apply_atlas(patient_registered, atlas_R_data)
     logger.info("  ROI gauche : %s  ROI droite : %s", roi_L.shape, roi_R.shape)
 
-    logger.info("[5/7] Segmentation fine dans les ROIs")
+    logger.info("[5/8] Segmentation fine dans les ROIs")
     seg_low, seg_high = (
         (INTENSITY_LOW, INTENSITY_HIGH) if already_preprocessed
         else (INTENSITY_LOW_RAW, INTENSITY_HIGH_RAW)
@@ -375,7 +403,7 @@ def run_segmentation_pipeline(
     mask_L = fine_segment(roi_L, atlas_mask_L, seg_low, seg_high)
     mask_R = fine_segment(roi_R, atlas_mask_R, seg_low, seg_high)
 
-    logger.info("[6/7] Volumétrie")
+    logger.info("[6/8] Volumétrie")
     vol_L = compute_volume_cm3(mask_L, atlas_zooms)
     vol_R = compute_volume_cm3(mask_R, atlas_zooms)
     vol_total = vol_L + vol_R
@@ -389,7 +417,7 @@ def run_segmentation_pipeline(
     logger.info("  Volume total      : %.3f cm³", vol_total)
     logger.info("  Index asymétrie   : %.1f %%", ai)
 
-    logger.info("[7/7] Évaluation  (Dice + IoU + HD95)")
+    logger.info("[7/8] Évaluation  (Dice + IoU + HD95)")
     gt_L = (atlas_L_data[slices_L] >= GT_THRESHOLD).astype(np.uint8)
     gt_R = (atlas_R_data[slices_R] >= GT_THRESHOLD).astype(np.uint8)
 
@@ -403,6 +431,26 @@ def run_segmentation_pipeline(
     logger.info("  Gauche : Dice=%.3f  IoU=%.3f  HD95=%.2f mm", d_L, i_L, hd95_L)
     logger.info("  Droit  : Dice=%.3f  IoU=%.3f  HD95=%.2f mm", d_R, i_R, hd95_R)
 
+    logger.info("[8/8] Export du masque")
+    mni_space_mask = np.zeros(atlas_L_data.shape, dtype=np.uint8)
+    mni_space_mask[slices_L][mask_L.astype(bool)] = 1
+    mni_space_mask[slices_R][mask_R.astype(bool)] = 2
+
+    mask_data, mask_affine = export_mask(mni_space_mask, inverse_info, patient_nib, mni_nib)
+    mask_space = "natif" if inverse_info[0] == "nib" else "MNI"
+
+    if mask_output_path is None:
+        name = Path(mri_path).name
+        for ext in (".nii.gz", ".nii"):
+            if name.endswith(ext):
+                name = name[: -len(ext)]
+                break
+        mask_output_path = str(Path(mri_path).with_name(f"{name}_hippo_mask.nii.gz"))
+    mask_nib_out = nib.Nifti1Image(mask_data, mask_affine)
+    mask_nib_out.header.set_data_dtype(np.uint8)
+    mask_nib_out.to_filename(mask_output_path)
+    logger.info("  masque enregistré (espace %s) : %s  (1=gauche, 2=droit)", mask_space, mask_output_path)
+
     asym_note = f"  ⚠ Asymétrie significative : {ai:.1f} %" if ai > 10.0 else ""
     status_text = (
         f"Hippocampe gauche : {vol_L:.3f} cm³  ({ratio_L:.2f} % du cerveau)\n"
@@ -412,10 +460,10 @@ def run_segmentation_pipeline(
     )
 
     return {
-        "left_volume": float(vol_L),
-        "right_volume": float(vol_R),
-        "total_volume": float(vol_total),
-        "brain_volume": float(brain_volume_cm3),
+        "left_volume": float(vol_L * 1000),
+        "right_volume": float(vol_R * 1000),
+        "total_volume": float(vol_total * 1000),
+        "brain_volume": float(brain_volume_cm3 * 1000),
         "hippo_ratio_left": float(ratio_L),
         "hippo_ratio_right": float(ratio_R),
         "asymmetry_index": float(ai),
@@ -425,6 +473,8 @@ def run_segmentation_pipeline(
         "iou_right": float(i_R),
         "hd95_left": float(hd95_L),
         "hd95_right": float(hd95_R),
+        "mask_path": mask_output_path,
+        "mask_space": mask_space,
         "status_text": status_text,
     }
 

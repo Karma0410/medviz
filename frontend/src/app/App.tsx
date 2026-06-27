@@ -6,11 +6,16 @@ import NiivueViewer, { SliceType, DragMode } from './NiivueViewer';
 import * as Select from '@radix-ui/react-select';
 import { Brain, FileText, HelpCircle, Upload, Download, Info, Activity, ChevronDown, Languages } from 'lucide-react';
 
-
 import { Language, translations } from './translations';
+import { exportReportAsPDF, generateClinicalInterpretation, AnalysisData } from './reportGenerator';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-console.log(API_BASE_URL);
+
+enum TaskStatus {
+  STARTED = 0,
+  PENDING = 1,
+  DONE = 2,
+}
 
 export default function App() {
   const [showImportModal, setShowImportModal] = useState(false);
@@ -30,12 +35,7 @@ export default function App() {
   const [maskUrl, setMaskUrl] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState('');
-  const [analysisResults, setAnalysisResults] = useState<{
-    left_volume: number;
-    right_volume: number;
-    total_volume: number;
-    status_text: string;
-  } | null>(null);
+  const [analysisResults, setAnalysisResults] = useState<AnalysisData | null>(null);
   const [history, setHistory] = useState<any[]>([]);
 
   const t = translations[language];
@@ -80,7 +80,7 @@ export default function App() {
     }
   };
 
-  const pollTaskStatus = (taskId: string) => {
+  const pollTaskStatus = (taskId: string, ws: WebSocket) => {
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/tasks/${taskId}`);
@@ -91,31 +91,78 @@ export default function App() {
         }
 
         const task = await res.json();
-        if (task.status === 'processing') {
+        if (task.status === TaskStatus.PENDING) {
           setAnalysisProgress('Running pipeline (Preprocessing -> Registration -> Atlas HarP -> Volumetry)...');
-        } else if (task.status === 'completed') {
+        } else if (task.status === TaskStatus.DONE) {
           clearInterval(interval);
           setIsAnalyzing(false);
           setAnalysisResults({
-            left_volume: task.left_volume,
+            left_volume:  task.left_volume,
             right_volume: task.right_volume,
             total_volume: task.total_volume,
+            brain_volume: task.brain_volume !== undefined ? task.brain_volume : undefined,
+            asymmetry_index: task.asymmetry_index,
+            dice_left: task.dice_left,
+            dice_right: task.dice_right,
+            iou_left: task.iou_left,
+            iou_right: task.iou_right,
+            classification_left: task.classification_left,
+            classification_right: task.classification_right,
             status_text: task.status_text,
           });
           setMaskUrl(`${API_BASE_URL}/tasks/${taskId}/mask`);
           fetchHistory();
-        } else if (task.status === 'failed') {
+          ws.close();
+          return;
+        } else {
           clearInterval(interval);
           setIsAnalyzing(false);
           alert('Analysis pipeline failed on the server.');
+          return;
         }
       } catch (err) {
         console.error('Error polling status', err);
         clearInterval(interval);
         setIsAnalyzing(false);
+        return;
       }
     }, 1000);
   };
+
+  const handleWebSocketMessage = async (taskId: string, event: any) => {
+    const task = JSON.parse(event.data);
+    if (task.task_id !== taskId) {
+      console.error("Task ID incorrect");
+      return;
+    }
+
+    switch (task.status) {
+      case (TaskStatus.DONE):
+        setIsAnalyzing(false);
+        setAnalysisResults({
+          left_volume:  task.left_volume,
+          right_volume: task.right_volume,
+          total_volume: task.total_volume,
+          brain_volume: task.brain_volume !== undefined ? task.brain_volume : undefined,
+          asymmetry_index: task.asymmetry_index,
+          dice_left: task.dice_left,
+          dice_right: task.dice_right,
+          iou_left: task.iou_left,
+          iou_right: task.iou_right,
+          classification_left: task.classification_left,
+          classification_right: task.classification_right,
+          status_text: task.status_text,
+        });
+        setMaskUrl(`${API_BASE_URL}/tasks/${taskId}/mask`);
+        fetchHistory();
+        break;
+      default:
+        setIsAnalyzing(false);
+        alert('Analysis pipeline failed on the server.');
+        break;
+    }
+    console.log("Task update:", task);
+  }
 
   const handleAgeConfirm = async () => {
     setShowAgeModal(false);
@@ -145,7 +192,27 @@ export default function App() {
       const taskId = task.task_id;
       
       setMriUrl(`${API_BASE_URL}/tasks/${taskId}/mri`);
-      pollTaskStatus(taskId);
+      setAnalysisProgress('Running pipeline (Preprocessing -> Registration -> Atlas HarP -> Volumetry)...');
+      const ws = new WebSocket("ws");
+
+      ws.onmessage = (event) => {
+        handleWebSocketMessage(taskId, event);
+        ws.close();
+      };
+
+      ws.onopen = () => {
+        console.log("Web socket successfully connected.");
+      };
+
+      ws.onclose = (e) => {
+        console.log("WS closed", e.code, e.reason);
+      };
+      
+      ws.onerror = (e) => {
+        console.log("WS error", e);
+      };
+
+      pollTaskStatus(taskId, ws);
     } catch (err) {
       console.error(err);
       setIsAnalyzing(false);
@@ -161,9 +228,17 @@ export default function App() {
     if (task.status === 'completed') {
       setMaskUrl(`${API_BASE_URL}/tasks/${task.task_id}/mask`);
       setAnalysisResults({
-        left_volume: task.left_volume,
+        left_volume:  task.left_volume,
         right_volume: task.right_volume,
         total_volume: task.total_volume,
+        brain_volume: task.brain_volume !== undefined ? task.brain_volume : undefined,
+        asymmetry_index: task.asymmetry_index,
+        dice_left: task.dice_left,
+        dice_right: task.dice_right,
+        iou_left: task.iou_left,
+        iou_right: task.iou_right,
+        classification_left: task.classification_left,
+        classification_right: task.classification_right,
         status_text: task.status_text,
       });
     } else {
@@ -415,10 +490,15 @@ export default function App() {
             <button 
               onClick={() => {
                 if (!analysisResults) {
-                  alert("No analysis results to export yet.");
+                  alert("No analysis results to export yet. Please run an analysis first.");
                   return;
                 }
-                window.print();
+                const ageNum = parseInt(age, 10) || 0;
+                exportReportAsPDF(
+                  analysisResults as AnalysisData,
+                  ageNum,
+                  selectedFile ?? 'scan.nii.gz'
+                );
               }}
               className="w-full bg-white/10 border border-white/20 text-white rounded-xl px-4 py-3 flex items-center justify-center gap-2 hover:bg-white/20 transition-colors font-medium"
             >
@@ -564,35 +644,88 @@ export default function App() {
 
               {/* Analysis Report */}
               <div className="bg-white border border-neutral-200 rounded-xl p-6 shadow-sm">
-                <h3 className="text-xl text-neutral-900 mb-4 font-medium">{t.analysisReport}</h3>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-6 pb-4 border-b border-neutral-200">
-                    <div>
-                      <p className="text-sm text-neutral-600 mb-1">{t.leftHippocampus}</p>
-                      <p className="text-2xl text-neutral-900 font-semibold">
-                        {analysisResults ? `${analysisResults.left_volume.toLocaleString()} mm³` : '-- mm³'}
+                <h3 className="text-xl text-neutral-900 mb-5 font-medium">{t.analysisReport}</h3>
+
+                {/* Volume cards */}
+                <div className="grid grid-cols-3 gap-4 mb-5">
+                  {[
+                    { label: t.leftHippocampus,  value: analysisResults?.left_volume,  cls: (analysisResults as any)?.classification_left },
+                    { label: t.rightHippocampus, value: analysisResults?.right_volume, cls: (analysisResults as any)?.classification_right },
+                    { label: t.totalHippocampus, value: analysisResults?.total_volume, cls: undefined },
+                  ].map(({ label, value, cls }) => (
+                    <div key={label} className="bg-neutral-50 border border-neutral-100 rounded-xl p-4">
+                      <p className="text-xs text-neutral-500 mb-1">{label}</p>
+                      <p className="text-xl text-neutral-900 font-semibold">
+                        {value !== undefined ? `${value.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} mm³` : '—'}
                       </p>
+                      {cls && (
+                        <span className={`inline-block mt-1 text-xs font-bold px-2 py-0.5 rounded-full ${
+                          cls.toUpperCase() === 'CN'  ? 'bg-green-100 text-green-700' :
+                          cls.toUpperCase() === 'MCI' ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-red-100 text-red-700'
+                        }`}>{cls.toUpperCase()}</span>
+                      )}
                     </div>
-                    <div>
-                      <p className="text-sm text-neutral-600 mb-1">{t.rightHippocampus}</p>
-                      <p className="text-2xl text-neutral-900 font-semibold">
-                        {analysisResults ? `${analysisResults.right_volume.toLocaleString()} mm³` : '-- mm³'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="pb-4 border-b border-neutral-200">
-                    <p className="text-sm text-neutral-600 mb-1">{t.totalHippocampus}</p>
-                    <p className="text-2xl text-neutral-900 font-semibold">
-                      {analysisResults ? `${analysisResults.total_volume.toLocaleString()} mm³` : '-- mm³'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-neutral-600 mb-2">{t.ageNormalized}</p>
-                    <p className="text-neutral-700 leading-relaxed">
-                      {analysisResults ? analysisResults.status_text : t.ageNormalizedText}
-                    </p>
-                  </div>
+                  ))}
                 </div>
+
+                {/* Indicateurs statistiques */}
+                {analysisResults && (() => {
+                  const ageNum = parseInt(age, 10) || 0;
+                  const report = generateClinicalInterpretation(analysisResults as AnalysisData, ageNum);
+                  const gradeColor =
+                    report.atrophyGrade === 'Normal'  ? 'bg-green-100 text-green-800 border-green-200' :
+                    report.atrophyGrade === 'Légère'  ? 'bg-yellow-100 text-yellow-800 border-yellow-200' :
+                    report.atrophyGrade === 'Modérée' ? 'bg-orange-100 text-orange-800 border-orange-200' :
+                    'bg-red-100 text-red-800 border-red-200';
+                  return (
+                    <>
+                      {/* Badges stats */}
+                      <div className="flex gap-3 mb-5 flex-wrap">
+                        <div className={`flex-1 min-w-0 rounded-lg border px-3 py-2 text-sm font-medium ${gradeColor}`}>
+                          <span className="block text-xs font-normal opacity-70 mb-0.5">Grade d&apos;atrophie</span>
+                          Atrophie {report.atrophyGrade}
+                        </div>
+                        <div className={`flex-1 min-w-0 rounded-lg border px-3 py-2 text-sm font-medium ${
+                          report.asymmetrySignificant
+                            ? 'bg-red-50 text-red-800 border-red-200'
+                            : 'bg-green-50 text-green-800 border-green-200'
+                        }`}>
+                          <span className="block text-xs font-normal opacity-70 mb-0.5">Asymétrie</span>
+                          {report.asymmetryIndex.toFixed(1)} %
+                          {report.asymmetrySignificant && ' ⚠ significative'}
+                        </div>
+                        <div className="flex-1 min-w-0 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm font-medium text-neutral-700">
+                          <span className="block text-xs font-normal text-neutral-500 mb-0.5">Z-score</span>
+                          {report.zScore.toFixed(2)}
+                          <span className="text-xs text-neutral-400 ml-1">({report.percentOfNorm.toFixed(0)} % norme)</span>
+                        </div>
+                      </div>
+
+                      {/* Interprétation clinique */}
+                      <div className="border-t border-neutral-100 pt-5">
+                        <p className="text-sm font-semibold text-neutral-700 mb-3 flex items-center gap-2">
+                          <span className="inline-block w-1 h-4 rounded bg-[#6b7c59]" />
+                          {t.ageNormalized}
+                        </p>
+                        <div className="space-y-3">
+                          {report.paragraphs.map((para, i) => (
+                            <p key={i} className="text-sm text-neutral-700 leading-relaxed">
+                              {para}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
+
+                {/* État vide */}
+                {!analysisResults && (
+                  <div className="border-t border-neutral-100 pt-4">
+                    <p className="text-sm text-neutral-500 italic">{t.ageNormalizedText}</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>

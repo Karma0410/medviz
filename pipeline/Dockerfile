@@ -21,4 +21,8 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 COPY --chown=worker_user:worker_user worker ./worker
 
+# pré-créé avec les bons droits pour amorcer correctement le volume partagé
+# "shared_data" (un volume nommé vide hérite sinon de root:root)
+RUN mkdir -p /app/data/masks
+
 CMD ["python", "-m", "worker.main"]

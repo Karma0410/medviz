@@ -7,9 +7,6 @@ services:
       - "80:80"
     volumes:
       - ../nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-    depends_on:
-      - backend
-      - frontend
     networks:
       - frontend_net
 
@@ -24,8 +21,9 @@ services:
       - /app/node_modules
     environment:
       VITE_API_BASE_URL: http://localhost/api
+      VITE_API_WS_URL: ws://localhost/ws
     ports:
-      - "5000:8000"
+      - "3000:3000"
     networks:
       - frontend_net
 
