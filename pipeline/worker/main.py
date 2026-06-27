@@ -1,20 +1,21 @@
 import os
-import sys
 import json
 import logging
-from urllib.parse import urlparse
-
-import redis
+from pathlib import Path
 
 from .pipeline import run_segmentation_pipeline
+from .redis_helpers import *
 
-_redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-_parsed = urlparse(_redis_url)
-redisClient = redis.Redis(
-    host=_parsed.hostname,
-    port=_parsed.port or 6379,
-    db=int(_parsed.path.lstrip("/") or 0),
-)
+# Doit correspondre à DATA_DIR/MASK_DIR de backend/main.py — partagé via le
+# volume "shared_data" monté sur /app/data dans les deux conteneurs.
+MASK_DIR = "/app/data/masks"
+
+
+def _mask_output_path(task_id: str, mri_path: str) -> str:
+    name = Path(mri_path).name
+    ext = ".nii.gz" if name.endswith(".nii.gz") else Path(mri_path).suffix
+    os.makedirs(MASK_DIR, exist_ok=True)
+    return os.path.join(MASK_DIR, f"{task_id}_mask{ext}")
 
 
 def main():
@@ -26,21 +27,24 @@ def main():
         datefmt="%H:%M:%S",
     )
 
-    print("Worker démarré, en attente de tâches…", flush=True)
+    logger.info("Worker démarré, en attente de tâches…")
     while True:
         try:
-            result = redisClient.blpop("tasks", timeout=0)
+            result = task_pop()
             if result is None:
                 continue
             _, raw = result
             task = json.loads(raw)
+            task_id = task["task_id"]
             mri_path = task["mri_path"]
             already_preprocessed = task.get("already_preprocessed")
-            print(f"Traitement de la tâche : {mri_path}", flush=True)
-            results = run_segmentation_pipeline(mri_path, already_preprocessed)
-            print(f"Résultats : {results}", flush=True)
+            mask_output_path = _mask_output_path(task_id, mri_path)
+            logger.info(f"Traitement de la tâche : {mri_path}")
+            results = run_segmentation_pipeline(mri_path, already_preprocessed, mask_output_path)
+            logger.info(f"Résultats : {results}")
+            enqueue_result(task_id, results)
         except Exception as e:
-            print(f"Erreur : {e}", file=sys.stderr, flush=True)
+            logger.error(f"Erreur : {e}")
 
 
 if __name__ == "__main__":
