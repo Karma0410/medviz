@@ -34,13 +34,16 @@ def test_default_values():
     assert task.left_volume == None
     assert task.right_volume == None
     assert task.total_volume == None
+    assert task.hippo_ratio_left == None
+    assert task.hippo_ratio_right == None
     assert task.asymmetry_index == None
     assert task.dice_left == None
     assert task.dice_right == None
     assert task.iou_left == None
     assert task.iou_right == None
-    assert task.classification_left == None
-    assert task.classification_right == None
+    assert task.hd95_left == None
+    assert task.hd95_right == None
+    assert task.status_text == None
 
 
 def test_unknown_task_returns_none():
@@ -61,8 +64,7 @@ def test_update_task():
         status=TaskStatus.DONE,
         left_volume=12.5,
         right_volume=8.2,
-        classification_left="healthy",
-        classification_right="lesion"
+        status_text="healthy"
     )
 
     updated = update_task(engine, task_id, update)
@@ -71,8 +73,7 @@ def test_update_task():
     assert updated.status == TaskStatus.DONE
     assert updated.left_volume == 12.5
     assert updated.right_volume == 8.2
-    assert updated.classification_left == "healthy"
-    assert updated.classification_right == "lesion"
+    assert updated.status_text == "healthy"
 
 
 # =========================================================

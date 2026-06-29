@@ -1,0 +1,11 @@
+stages:
+  - validate
+  - tests
+  - build
+  - deploy
+
+include:
+  - local: '.gitlab/ci/validate.yml'
+  - local: '.gitlab/ci/tests.yml'
+  - local: '.gitlab/ci/build.yml'
+  - local: '.gitlab/ci/deploy.yml'
