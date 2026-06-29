@@ -22,7 +22,7 @@ deploy:
     - main
     - ci-test
 
-deploy:documentation:
+pages:
   stage: deploy
   script:
     - mv ./documentation/build public/

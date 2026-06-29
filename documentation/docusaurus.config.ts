@@ -7,8 +7,8 @@ const config: Config = {
   tagline: 'Documentation',
   favicon: 'img/favicon.ico',
 
-  url: 'https://akram.ridou.gitlab.cri.epita.io',
-  baseUrl: '/medviz/',
+  url: 'https://medviz-9130a8.pages.epita.fr/',
+  baseUrl: '',
 
   organizationName: 'akram.ridou',
   projectName: 'medviz',
