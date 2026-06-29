@@ -1,0 +1,152 @@
+---
+sidebar_position: 3
+---
+
+# Deployment
+
+## Production Docker Compose
+
+The production stack is defined in `deploy/docker-compose.yml` and orchestrates six services.
+
+### Starting the stack
+
+```bash
+cd deploy
+docker compose up -d --build
+```
+
+`--build` rebuilds the frontend and backend images. Omit it on subsequent deploys if only configuration changed.
+
+### Stopping the stack
+
+```bash
+cd deploy
+docker compose down
+```
+
+To also remove persistent volumes (all data lost):
+
+```bash
+docker compose down -v
+```
+
+## Services
+
+### nginx
+
+| Property | Value |
+|---|---|
+| Image | `nginx:alpine` |
+| Exposed port | `80` |
+| Config | `nginx/default.conf` |
+
+The Nginx config routes:
+- `/` → `frontend` container (static files)
+- `/api/` → `backend:8000` (strips `/api` prefix)
+
+### frontend
+
+| Property | Value |
+|---|---|
+| Build context | `frontend/` |
+| Key env var | `VITE_API_BASE_URL=http://localhost/api` |
+| Network | `frontend_net` |
+
+The frontend is built at container build time with Vite. The `VITE_API_BASE_URL` value is embedded into the JavaScript bundle at build time; changing it requires a rebuild.
+
+### backend
+
+| Property | Value |
+|---|---|
+| Build context | `backend/` |
+| Internal port | `8000` |
+| Networks | `frontend_net`, `backend_net` |
+| Shared volume | `shared_data:/app/data` |
+
+| Env var | Value |
+|---|---|
+| `DATABASE_URL` | `postgresql+psycopg://postgres:postgres@postgres:5432/medviz` |
+| `REDIS_URL` | `redis://redis:6379/0` |
+
+### pipeline
+
+| Property | Value |
+|---|---|
+| Build context | `pipeline/` |
+| Network | `backend_net` (internal only) |
+| Shared volume | `shared_data:/app/data` |
+
+| Env var | Value |
+|---|---|
+| `REDIS_URL` | `redis://redis:6379/0` |
+
+The pipeline container runs the worker process that pops tasks from Redis and runs the segmentation. The atlas files must be present inside the image (baked into the Docker build) or mounted as a volume.
+
+### redis
+
+| Property | Value |
+|---|---|
+| Image | `redis:8-alpine` |
+| Exposed port | `6379` *(backend_net only)* |
+| Network | `backend_net` |
+
+Data is **not** persisted across restarts by default. Task payloads in Redis are ephemeral; durable results are stored in PostgreSQL.
+
+### postgres
+
+| Property | Value |
+|---|---|
+| Image | `postgres:17-alpine` |
+| Exposed port | `5432` *(backend_net only)* |
+| Network | `backend_net` |
+| Volume | `postgres_data` |
+
+| Env var | Default |
+|---|---|
+| `POSTGRES_USER` | `postgres` |
+| `POSTGRES_PASSWORD` | `postgres` |
+| `POSTGRES_DB` | `medviz` |
+
+:::warning
+Change the default PostgreSQL credentials before exposing the stack on a public network.
+:::
+
+## Volumes
+
+| Volume | Used by | Contents |
+|---|---|---|
+| `postgres_data` | postgres | PostgreSQL WAL and data files |
+| `shared_data` | backend, pipeline | Uploaded MRI files and generated masks |
+
+## Scaling the pipeline worker
+
+To process multiple scans in parallel, scale the pipeline service:
+
+```bash
+docker compose up -d --scale pipeline=3
+```
+
+Each worker instance independently pops tasks from the Redis queue. Ensure the host has enough CPU/RAM, as each pipeline run can use 2–4 GB of memory during registration.
+
+## Nginx configuration
+
+See `nginx/default.conf` for the proxy rules. The key block:
+
+```nginx
+location /api/ {
+    proxy_pass http://backend:8000/;
+}
+```
+
+The trailing slash on both sides strips the `/api` prefix before forwarding to FastAPI.
+
+## Building the documentation
+
+```bash
+cd documentation
+npm install
+npm run build   # outputs to documentation/build/
+npm start       # local dev server with hot reload
+```
+
+The built site can be served from any static hosting service or added to the Nginx config.

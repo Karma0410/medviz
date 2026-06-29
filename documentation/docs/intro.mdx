@@ -1,0 +1,58 @@
+---
+sidebar_position: 1
+---
+
+# Introduction
+
+**NeuroVolumetry** is a medical web application for Alzheimer's disease diagnostic support through automated hippocampal volumetry. It accepts a T1-weighted structural brain MRI in NIfTI format, renders the scan in 3D/multiplanar view via the NiiVue library, and runs a server-side segmentation pipeline that measures left and right hippocampal volumes and compares them to age-normalised reference curves.
+
+:::note
+NeuroVolumetry is a research and diagnostic support tool. All findings must be interpreted by qualified healthcare professionals in conjunction with clinical evaluation and other diagnostic tests. This application does not provide medical diagnoses.
+:::
+
+## Why hippocampal volumetry?
+
+The hippocampus is one of the first brain regions affected by Alzheimer's disease. Measurable atrophy can appear years before clinical symptoms, making volumetric measurement a valuable biomarker for early detection and disease-progression monitoring.
+
+## Key features
+
+| Feature | Detail |
+|---|---|
+| MRI viewer | NiiVue-powered 3D / multiplanar / single-plane rendering with mask overlay |
+| Automated pipeline | Skull stripping → N4 correction → MNI registration → HarP atlas → volumetry |
+| Classification | Age-stratified CN / MCI / AD thresholds based on established reference data |
+| Quality metrics | Dice, IoU, and HD95 against the HarP probabilistic atlas |
+| Multi-language UI | English, French, Spanish |
+| History | All past analyses persisted in PostgreSQL and browsable in the sidebar |
+| Report export | One-click print-to-PDF from the Analysis tab |
+
+## Tech stack overview
+
+```
+Browser (React + NiiVue)
+        │
+        ▼  HTTP / REST
+  FastAPI backend (Python)
+    │             │
+    │             ▼
+  Redis        PostgreSQL
+  queue        (task results)
+    │
+    ▼
+ Pipeline worker (Python)
+ nibabel · SimpleITK · scipy
+```
+
+- **Frontend:** React 18, Vite, TailwindCSS, Radix UI, NiiVue
+- **Backend:** FastAPI, SQLModel, psycopg, redis-py
+- **Pipeline:** nibabel, SimpleITK, scipy, numpy
+- **Infrastructure:** Docker Compose, Nginx reverse proxy, PostgreSQL 17, Redis 8
+
+## Next steps
+
+- [Getting Started](./getting-started): run the stack locally or deploy to production
+- [Architecture](./architecture): service topology, networking and data flow
+- [User Guide](./user-guide/interface): how to use the application
+- [API Reference](./technical/api-reference): REST endpoints
+- [Pipeline](./technical/pipeline): segmentation algorithm in detail
+- [Deployment](./technical/deployment): production Docker Compose setup

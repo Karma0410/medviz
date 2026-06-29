@@ -1,0 +1,183 @@
+---
+sidebar_position: 2
+---
+
+# Segmentation Pipeline
+
+The pipeline is implemented in `pipeline/worker/pipeline.py` and runs inside a dedicated Docker container (`pipeline`). It listens on the Redis `tasks` queue with a blocking `BLPOP` call and processes one task at a time.
+
+## Trigger
+
+The backend pushes a JSON payload to Redis after saving the MRI file:
+
+```json
+{"task_id": "550e8400-…", "mri_path": "/app/data/uploads/550e8400-….nii.gz"}
+```
+
+The worker pops this message and calls `run_segmentation_pipeline(mri_path)`.
+
+## 1. Load NIfTI files
+
+```python
+patient_nib = nib.load(mri_path)      # patient MRI
+atlas_L_nib = nib.load(ATLAS_L)       # HarP left probabilistic atlas
+atlas_R_nib = nib.load(ATLAS_R)       # HarP right probabilistic atlas
+mni_nib     = nib.load(MNI_TEMPLATE)  # MNI 152 T1 template
+```
+
+Atlas paths (relative to `pipeline/worker/`):
+
+| File | Path |
+|---|---|
+| Left HarP | `atlas/hypocampe/HarP-prob_L.nii` |
+| Right HarP | `atlas/hypocampe/HarP-prob_R.nii` |
+| MNI template | `atlas/hypocampe/mni_icbm152_t1_tal_nlin_asym_09c.nii` |
+| MNI brain mask | `atlas/skull/MNI152_T1_1mm_brain_mask.nii.gz` |
+
+## 2. Preprocessing
+
+Preprocessing is **skipped** if the filename contains `"normalised"` (OASIS convention), otherwise the full pipeline runs.
+
+### Skull stripping
+
+An affine registration aligns the MNI brain mask to the patient's native space:
+
+1. Normalise both patient and MNI images to [0, 1].
+2. Run `SimpleITK.ImageRegistrationMethod` with Mattes mutual information, gradient descent (200 iterations), 3-level multi-resolution (shrink factors 4/2/1, smoothing sigmas 2/1/0 mm).
+3. Resample the MNI brain mask into native space using nearest-neighbour interpolation.
+4. Apply the mask: `data_stripped = data × brain_mask`.
+
+### N4 bias field correction
+
+`SimpleITK.N4BiasFieldCorrectionImageFilter` is applied on a 4× downsampled image (for speed), then the full-resolution log-bias field is reconstructed and divided out.
+
+Iterations per resolution level: `[50, 50, 30, 20]`.
+
+### Intensity normalisation
+
+Brain voxels are scaled linearly to [0, 1] using `(x − min) / (max − min)`.
+
+## 3. Affine registration to MNI space
+
+The preprocessed patient volume is registered to the MNI 152 template:
+
+- Fixed image: MNI template
+- Moving image: normalised patient brain
+- Method: `_affine_register()` (same mutual information + gradient descent as Step 2)
+- Output: resampled patient array in MNI space
+
+If the patient image is already in **MNI 2mm FSL space** (shape 91×109×91, voxel ≈ 2 mm), nibabel affine-based resampling is used instead to avoid unnecessary registration.
+
+## 4. HarP atlas application
+
+The HarP probabilistic atlas (threshold 0.30) defines binary ROI masks for each hippocampus. A bounding box is extracted from each mask with **5-voxel padding**:
+
+```python
+roi_L, atlas_mask_L, slices_L = apply_atlas(patient_registered, atlas_L_data)
+roi_R, atlas_mask_R, slices_R = apply_atlas(patient_registered, atlas_R_data)
+```
+
+If the patient and atlas shapes differ after registration, a zoom correction is applied.
+
+## 5. Fine segmentation
+
+Within each ROI, a two-stage refinement produces the final binary hippocampus mask:
+
+1. **Gaussian smoothing** (σ = 0.5 voxels)
+2. **Intensity thresholding**:
+   - Pre-processed scans: `[0.20, 0.42]`
+   - Raw (unpreprocessed) scans: `[0.50, 0.95]`
+3. **AND** with the atlas ROI mask
+4. **Morphological opening** (1 iteration) to remove small noise
+5. **Morphological closing** (2 iterations) to fill small holes
+6. **Connected components:** keep only the largest component
+
+## 6. Volumetry
+
+### Volume computation
+
+```
+volume_cm³ = voxel_count × voxel_volume_mm³ / 1000
+```
+
+Voxel volume comes from the atlas header zooms (in mm).
+
+### Hippocampus-to-brain ratio
+
+```
+ratio_L = vol_L / brain_volume_cm³ × 100   (%)
+ratio_R = vol_R / brain_volume_cm³ × 100   (%)
+```
+
+### Asymmetry index
+
+```
+AI = |vol_L − vol_R| / (vol_L + vol_R) × 100   (%)
+```
+
+Values above 10 % are flagged in the report.
+
+### Classification
+
+Age-stratified thresholds per hippocampus:
+
+| Age | CN threshold | MCI threshold |
+|---|---|---|
+| < 75 | ≥ 4.30 cm³ | ≥ 3.79 cm³ |
+| ≥ 75 | ≥ 4.04 cm³ | ≥ 3.92 cm³ |
+
+A ratio-based classification (hippocampus / brain %) is also computed using separate reference values.
+
+## 7. Quality metrics
+
+Segmentation quality is evaluated against the binarised HarP atlas (threshold 0.50) inside the bounding-box region:
+
+### Dice similarity coefficient
+
+```
+Dice = 2 × |pred ∩ ref| / (|pred| + |ref|)
+```
+
+### Intersection over Union
+
+```
+IoU = |pred ∩ ref| / |pred ∪ ref|
+```
+
+### 95th-percentile Hausdorff distance (HD95)
+
+1. Extract surface voxels of both prediction and reference (voxels adjacent to background).
+2. Compute Euclidean distance transform from each surface in physical mm.
+3. Collect all bidirectional surface distances and return the 95th percentile.
+
+## Pipeline output
+
+`run_segmentation_pipeline()` returns a dictionary written to the database by the worker:
+
+```python
+{
+    "left_volume":      float,   # cm³
+    "right_volume":     float,   # cm³
+    "total_volume":     float,   # cm³
+    "brain_volume":     float,   # cm³
+    "hippo_ratio_left": float,   # %
+    "hippo_ratio_right":float,   # %
+    "asymmetry_index":  float,   # %
+    "dice_left":        float,
+    "dice_right":       float,
+    "iou_left":         float,
+    "iou_right":        float,
+    "hd95_left":        float,   # mm
+    "hd95_right":       float,   # mm
+    "status_text":      str,     # human-readable summary
+}
+```
+
+## Running the pipeline standalone
+
+```bash
+cd pipeline
+uv run python -m worker.pipeline /path/to/patient.nii.gz
+```
+
+Output is printed to stdout.
