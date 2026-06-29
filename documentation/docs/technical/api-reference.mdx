@@ -1,0 +1,138 @@
+---
+sidebar_position: 1
+---
+
+# API Reference
+
+The backend exposes a REST API at `/api` (via the Nginx reverse proxy) or directly at `http://localhost:8000` in development. Interactive Swagger UI is available at `/api/docs`.
+
+All responses are JSON unless a file is returned.
+
+## <span className="badge badge--success">POST</span> `/analyze`
+
+Submit a brain MRI for hippocampal volumetry analysis.
+
+**Content-Type:** `multipart/form-data`
+
+### Request fields
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `file` | file | Yes | MRI file (`.nii`, `.nii.gz`, `.dcm`) |
+| `age` | int | Yes | Patient age in years |
+
+### Response `200 OK`
+
+```json
+{
+  "task_id": "550e8400-e29b-41d4-a716-446655440000",
+  "filename": "/app/data/uploads/550e8400-e29b-41d4-a716-446655440000.nii.gz",
+  "age": 72,
+  "status": "PENDING"
+}
+```
+
+### Error responses
+
+| Code | Reason |
+|---|---|
+| <span className="badge badge--warning">400</span> | Missing or empty filename |
+| <span className="badge badge--danger">500</span> | Failed to write file to disk |
+
+## <span className="badge badge--primary">GET</span> `/tasks/{task_id}`
+
+Get the status and results of an analysis task.
+
+### Path parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `task_id` | string (UUID) | Task identifier returned by `/analyze` |
+
+### Response `200 OK`
+
+```json
+{
+  "id": 1,
+  "task_id": "550e8400-e29b-41d4-a716-446655440000",
+  "filename": "/app/data/uploads/550e8400-e29b-41d4-a716-446655440000.nii.gz",
+  "age": 72,
+  "status": "completed",
+  "left_volume": 3.812,
+  "right_volume": 3.654,
+  "total_volume": 7.466,
+  "hippo_ratio_left": 0.28,
+  "hippo_ratio_right": 0.27,
+  "asymmetry_index": 4.2,
+  "dice_left": 0.712,
+  "dice_right": 0.698,
+  "iou_left": 0.553,
+  "iou_right": 0.537,
+  "hd95_left": 2.14,
+  "hd95_right": 2.31,
+  "status_text": "Hippocampe gauche : 3.812 cm³  (0.28 % du cerveau)\n..."
+}
+```
+
+Numeric result fields are `null` while analysis is still running.
+
+### Error responses
+
+| Code | Reason |
+|---|---|
+| <span className="badge badge--warning">404</span> | Task ID not found |
+
+## <span className="badge badge--primary">GET</span> `/tasks/{task_id}/mri`
+
+Download the original MRI file for a task.
+
+**Response:** binary file stream (`application/octet-stream`)
+
+### Error responses
+
+| Code | Reason |
+|---|---|
+| <span className="badge badge--warning">404</span> | Task not found or MRI file missing on disk |
+
+## <span className="badge badge--primary">GET</span> `/tasks/{task_id}/mask`
+
+Download the hippocampal segmentation mask for a completed task.
+
+**Response:** binary file stream (`application/octet-stream`)
+
+:::note
+Returns `400` if the task is not yet completed. The mask file only exists after the pipeline finishes.
+:::
+
+### Error responses
+
+| Code | Reason |
+|---|---|
+| <span className="badge badge--warning">400</span> | Analysis not yet completed |
+| <span className="badge badge--warning">404</span> | Task not found or mask file missing on disk |
+
+## <span className="badge badge--primary">GET</span> `/tasks`
+
+List all tasks stored in Redis.
+
+### Response `200 OK`
+
+```json
+[
+  {
+    "task_id": "550e8400-e29b-41d4-a716-446655440000",
+    "mri_path": "/app/data/uploads/550e8400-e29b-41d4-a716-446655440000.nii.gz",
+    ...
+  }
+]
+```
+
+## Task status values
+
+| Value | Meaning |
+|---|---|
+| <span className="badge badge--secondary">STARTED</span> | Row inserted, file saved, not yet enqueued |
+| <span className="badge badge--warning">PENDING</span> | Enqueued in Redis, waiting for a worker |
+| <span className="badge badge--success">DONE</span> | Pipeline completed successfully |
+
+The frontend polls `GET /tasks/{task_id}` every second and checks for `"completed"` in the status field.

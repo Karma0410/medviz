@@ -1,0 +1,109 @@
+---
+sidebar_position: 3
+---
+
+# Architecture
+
+## Service topology
+
+```
+                ┌─────────────────────────────────────────┐
+                │            Client Browser               │
+                │       React SPA + NiiVue renderer       │
+                └──────────────────┬──────────────────────┘
+                                   │ HTTP port 80
+                ┌──────────────────▼──────────────────────┐
+                │               Nginx                     │
+                │  /        → frontend container          │
+                │  /api     → backend:8000                │
+                └──────┬──────────────────────────────────┘
+                       │
+          ┌────────────▼────────────────┐
+          │      FastAPI Backend        │
+          │      (Python, port 8000)    │
+          └──────┬──────────┬───────────┘
+                 │          │
+         rpush   │          │  read / write
+         "tasks" │          │  task rows
+                 ▼          ▼
+             Redis       PostgreSQL
+             queue       (results DB)
+                 │
+         blpop   │
+                 ▼
+          ┌──────────────────────────┐
+          │    Pipeline Worker       │
+          │  nibabel · SimpleITK     │
+          │  scipy · numpy           │
+          └──────────────────────────┘
+```
+
+## Networks
+
+Two Docker networks isolate public from internal traffic:
+
+| Network | Containers | Internet-facing |
+|---|---|---|
+| `frontend_net` | nginx, frontend, backend | Yes (port 80) |
+| `backend_net` | backend, pipeline, redis, postgres | No (internal) |
+
+The backend sits in **both** networks; it is the only service that bridges the two planes. The pipeline worker and Redis/PostgreSQL are never directly reachable from the internet.
+
+## Data flow: analysis request
+
+```
+1.  User uploads .nii.gz + age   → POST /api/analyze
+2.  Backend saves file to disk   → /app/data/uploads/<task_id>.nii.gz
+3.  Backend creates DB row       → Task(status=PENDING)
+4.  Backend pushes to Redis      → RPUSH tasks {"task_id":…, "mri_path":…}
+5.  Backend returns              → {task_id, status: "pending"}
+6.  Frontend polls every 1 s    → GET /api/tasks/<task_id>
+7.  Worker receives from Redis   → BLPOP tasks
+8.  Worker runs pipeline         → 7-step segmentation (minutes)
+9.  Worker updates DB            → Task(status=DONE, left_volume=…, …)
+10. Frontend polls, sees DONE    → fetches mask URL, renders overlay
+```
+
+## Shared volume
+
+The backend and pipeline worker share a single Docker volume (`shared_data`) mounted at `/app/data` in both containers. This lets the worker read the MRI file path that the backend wrote and output the segmentation mask without any file transfer over the network.
+
+```
+shared_data:/app/data/
+├── uploads/   ← backend writes here, worker reads
+└── masks/     ← worker writes here, backend serves
+```
+
+## Database schema
+
+The `task` table (managed by SQLModel / SQLAlchemy) holds every analysis:
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | int PK | Auto-increment row id |
+| `task_id` | str | UUID assigned at upload time |
+| `filename` | str | Original MRI file path on disk |
+| `age` | int | Patient age supplied at upload |
+| `status` | enum | `STARTED` / `PENDING` / `DONE` |
+| `left_volume` | float? | Left hippocampus volume (cm³) |
+| `right_volume` | float? | Right hippocampus volume (cm³) |
+| `total_volume` | float? | Sum of left + right (cm³) |
+| `hippo_ratio_left` | float? | Left volume as % of brain volume |
+| `hippo_ratio_right` | float? | Right volume as % of brain volume |
+| `asymmetry_index` | float? | `\|L-R\| / (L+R) × 100` (%) |
+| `dice_left` | float? | Dice score vs HarP atlas left |
+| `dice_right` | float? | Dice score vs HarP atlas right |
+| `iou_left` | float? | IoU score vs HarP atlas left |
+| `iou_right` | float? | IoU score vs HarP atlas right |
+| `hd95_left` | float? | 95th-percentile Hausdorff distance left (mm) |
+| `hd95_right` | float? | 95th-percentile Hausdorff distance right (mm) |
+| `status_text` | str? | Human-readable summary of results |
+
+## Task status lifecycle
+
+```
+STARTED  →  PENDING  →  DONE
+                  ↘ (on error, worker logs the exception and continues)
+```
+
+`STARTED` is the default set by the ORM at insert time. The backend immediately transitions to `PENDING` before enqueuing. `DONE` is written by the pipeline worker after segmentation completes.

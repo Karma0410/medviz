@@ -1,0 +1,108 @@
+---
+sidebar_position: 2
+---
+
+# Getting Started
+
+## Prerequisites
+
+| Tool | Minimum version |
+|---|---|
+| Docker | 24 |
+| Docker Compose | v2 |
+| Node.js *(dev only)* | 20 |
+| Python *(dev only)* | 3.12 |
+
+## Production: one command
+
+```bash
+cd deploy
+docker compose up -d --build
+```
+
+The stack spins up six containers: **nginx**, **frontend**, **backend**, **pipeline**, **redis**, and **postgres**.
+
+| URL | Service |
+|---|---|
+| `http://localhost` | Web UI |
+| `http://localhost/api/docs` | FastAPI interactive docs (Swagger UI) |
+
+## Development: run services individually
+
+### 1. Backend
+
+```bash
+cd backend
+uv sync
+DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/medviz \
+REDIS_URL=redis://localhost:6379/0 \
+uv run uvicorn main:app --reload --port 8000
+```
+
+### 2. Pipeline worker
+
+```bash
+cd pipeline
+uv sync
+REDIS_URL=redis://localhost:6379/0 \
+uv run -m worker.main
+```
+
+### 3. Frontend
+
+```bash
+cd frontend
+npm install
+VITE_API_BASE_URL=http://localhost:8000 npm run dev
+```
+
+The Vite dev server starts on `http://localhost:5173` with hot reload.
+
+### 4. Dependencies (Redis + PostgreSQL)
+
+Use the dev Compose file to start only the infrastructure services:
+
+```bash
+cd dev
+docker compose up -d
+```
+
+This starts Redis on port `6379` and PostgreSQL on port `5432` with credentials `postgres / postgres / medviz`.
+
+## Environment variables
+
+### Backend
+
+| Variable | Description | Example |
+|---|---|---|
+| `DATABASE_URL` | SQLAlchemy DSN for PostgreSQL | `postgresql+psycopg://postgres:postgres@postgres:5432/medviz` |
+| `REDIS_URL` | Redis connection URL | `redis://redis:6379/0` |
+
+### Pipeline worker
+
+| Variable | Description | Example |
+|---|---|---|
+| `REDIS_URL` | Redis connection URL | `redis://redis:6379/0` |
+
+### Frontend
+
+| Variable | Description | Example |
+|---|---|---|
+| `VITE_API_BASE_URL` | Base URL of the FastAPI backend | `http://localhost/api` |
+
+## Required atlas files
+
+The pipeline requires three atlas files that are **not** included in the repository due to size. Place them at the following paths inside the `pipeline/` directory:
+
+```
+pipeline/worker/atlas/
+├── hypocampe/
+│   ├── HarP-prob_L.nii          # HarP left hippocampus probabilistic atlas
+│   ├── HarP-prob_R.nii          # HarP right hippocampus probabilistic atlas
+│   └── mni_icbm152_t1_tal_nlin_asym_09c.nii   # MNI 152 T1 template
+└── skull/
+    └── MNI152_T1_1mm_brain_mask.nii.gz         # MNI brain mask
+```
+
+- **HarP atlas:** available from the EADC-ADNI Harmonized Protocol project
+- **MNI 152 template:** available from the MNI/McGill Neuroimaging Toolbox

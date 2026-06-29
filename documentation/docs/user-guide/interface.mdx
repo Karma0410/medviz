@@ -1,0 +1,63 @@
+---
+sidebar_position: 1
+---
+
+# Interface Overview
+
+The application has two top-level tabs accessible from the navigation bar.
+
+## Home / Explanations tab
+
+The Home tab is an informational page that explains:
+
+- What NeuroVolumetry does
+- The four-step analysis process (import → segment → measure → report)
+- Background on Alzheimer's disease and the role of hippocampal atrophy
+
+No interaction is required here. Use it to orient yourself or share context with patients and colleagues.
+
+## Analysis tab
+
+The Analysis tab is split into a **left sidebar** and a **main content area**.
+
+### Left sidebar
+
+| Element | Description |
+|---|---|
+| Select a file button | Opens the file import modal |
+| Selected file name | Truncated path of the currently loaded MRI |
+| Patient age input | Numeric field; accepts positive integers |
+| Recent Analyses | Scrollable list of past tasks fetched from the backend on load |
+| Export report | Triggers the browser print dialog for the current results |
+
+Clicking any item in **Recent Analyses** loads that scan and its results (if completed) into the viewer and report panel without re-running the pipeline.
+
+### Main content area
+
+#### NiiVue viewer
+
+The black panel renders the MRI volume. Once analysis completes, the hippocampal segmentation mask is overlaid in red (opacity 65 %).
+
+#### View Settings
+
+| Control | Options |
+|---|---|
+| Orientation | Multiplanar · Axial · Coronal · Sagittal · 3D Render |
+| Mouse Action | Zoom · Pan · Contrast · Measurement |
+| 3D Azimuth | 0 – 360 ° (slider, active only in 3D mode) |
+| 3D Elevation | −90 – 90 ° (slider, active only in 3D mode) |
+
+#### Analysis Report
+
+Displays three volume measurements and an age-normalised interpretation once analysis is complete:
+
+| Field | Description |
+|---|---|
+| Left Hippocampus Volume | Volume of the left hippocampus in mm³ |
+| Right Hippocampus Volume | Volume of the right hippocampus in mm³ |
+| Total Hippocampal Volume | Sum of left + right in mm³ |
+| Age-Normalized Comparison | Detailed text from the pipeline: volumes, brain ratios, Dice / IoU scores, asymmetry index |
+
+## Language selector
+
+A language selector is available in the top-right of the navigation bar. The UI is fully translated into **English**, **French**, and **Spanish**.

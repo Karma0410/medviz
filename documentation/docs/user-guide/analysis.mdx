@@ -1,0 +1,92 @@
+---
+sidebar_position: 2
+---
+
+# Running an Analysis
+
+## 1. Import an MRI scan
+
+1. Navigate to the **Analysis** tab.
+2. Click **Select a file** (sidebar or modal).
+3. Choose a brain MRI file. Supported formats:
+
+   | Format | Extension |
+   |---|---|
+   | NIfTI (compressed) | `.nii.gz` |
+   | NIfTI (uncompressed) | `.nii` |
+   | DICOM | `.dcm` |
+
+   :::tip
+   The pipeline is optimised for **T1-weighted structural MRI**. Functional or diffusion images will not produce meaningful hippocampal segmentations.
+   :::
+
+   After selection the **Age input modal** opens automatically.
+
+## 2. Enter patient age
+
+Type the patient's age in years and click **Confirm**.
+
+Age is used for the classification step: the pipeline applies different volume thresholds for patients under 75 and those 75 or older.
+
+## 3. Wait for the pipeline
+
+The MRI is uploaded to the backend and enqueued for processing. The viewer shows the raw scan immediately while the analysis runs in the background.
+
+A spinner overlay shows the current pipeline stage:
+
+> *Running pipeline (Preprocessing → Registration → Atlas HarP → Volumetry)...*
+
+Typical processing time is **3 – 8 minutes** depending on server hardware.
+
+## 4. Review results
+
+When the pipeline completes:
+
+- The hippocampal segmentation mask (red overlay) appears in the viewer.
+- The **Analysis Report** panel populates with volume measurements.
+- The task is added to the **Recent Analyses** history.
+
+### Interpreting the report
+
+The `Age-Normalized Comparison` field contains a text summary like:
+
+```
+Hippocampe gauche : 3.812 cm³  (0.28 % du cerveau)
+Hippocampe droit  : 3.654 cm³  (0.27 % du cerveau)
+Volume total      : 7.466 cm³
+⚠ Asymétrie significative : 12.3 %
+Dice : G=0.712  D=0.698  |  IoU : G=0.553  D=0.537
+```
+
+#### Volume classification thresholds
+
+| Age group | CN (normal) | MCI | AD |
+|---|---|---|---|
+| < 75 years | ≥ 4.30 cm³ | 3.79 – 4.30 cm³ | < 3.79 cm³ |
+| ≥ 75 years | ≥ 4.04 cm³ | 3.92 – 4.04 cm³ | < 3.92 cm³ |
+
+Thresholds apply **per hippocampus** (left and right independently).
+
+#### Asymmetry index
+
+`|L − R| / (L + R) × 100`
+
+A value above **10 %** is flagged with a warning. Significant asymmetry may indicate focal pathology on one side.
+
+#### Quality metrics
+
+| Metric | Meaning |
+|---|---|
+| Dice | Overlap with the HarP probabilistic atlas (0 = no overlap, 1 = perfect) |
+| IoU | Intersection-over-Union with HarP |
+| HD95 | 95th-percentile Hausdorff distance from HarP surface (mm); lower is better |
+
+These metrics measure how well the automatic segmentation matches the HarP reference, not the Alzheimer severity. Low Dice/IoU can indicate poor image quality or an atypical anatomy that confused the atlas registration.
+
+## 5. Export
+
+Click **Export report** in the sidebar to print the current view (Ctrl+P / Cmd+P). The browser print dialog lets you save as PDF.
+
+## Revisiting past analyses
+
+Click any entry in **Recent Analyses** to restore that scan and its results without re-running the pipeline. If the analysis is still in progress, the mask and report are not shown until it completes.
