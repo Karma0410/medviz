@@ -2,7 +2,6 @@ deploy:
   stage: deploy
   image: alpine:latest
   before_script:
-  before_script:
     - apk add --no-cache git openssh
 
     - mkdir -p ~/.ssh
@@ -19,6 +18,17 @@ deploy:
     - git push github HEAD:main --force
     - git push github --tags
 
+  only:
+    - main
+    - ci-test
+
+deploy:documentation:
+  stage: deploy
+  script:
+    - mv ./documentation/build public/
+  artifacts:
+    paths:
+      - public
   only:
     - main
     - ci-test
