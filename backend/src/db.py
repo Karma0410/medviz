@@ -3,9 +3,10 @@ from sqlmodel import SQLModel, Field, Session, select
 from src.enums import TaskStatus
 from config import engine
 
+
 class Task(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    task_id: str # ID of the associated redis taks
+    task_id: str  # ID of the associated redis taks
     filename: str
     age: int
     status: TaskStatus = Field(default=TaskStatus.STARTED)
@@ -24,6 +25,7 @@ class Task(SQLModel, table=True):
     hd95_right: float | None = Field(default=None)
     status_text: str | None = Field(default=None)
 
+
 class TaskUpdate(SQLModel):
     status: TaskStatus | None = None
     left_volume: float | None = None
@@ -40,6 +42,7 @@ class TaskUpdate(SQLModel):
     hd95_left: float | None = None
     hd95_right: float | None = None
     status_text: str | None = None
+
 
 class TaskRepository:
     def __init__(self):

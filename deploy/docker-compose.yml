@@ -52,20 +52,6 @@ services:
     networks:
       - backend_net
 
-  pipeline:
-    build:
-      context: ../pipeline
-    container_name: pipeline
-    restart: always
-    volumes:
-      - shared_data:/app/data
-    environment:
-      REDIS_URL: redis://redis:6379/0
-    depends_on:
-      - redis
-    networks:
-      - backend_net
-
   redis:
     image: redis:8-alpine
     container_name: redis

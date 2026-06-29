@@ -1,11 +1,11 @@
-build:backend:
+build:
   stage: build
   image:
-    name: $CI_REGISTRY_IMAGE/kaniko:latest
+    name: $CI_REGISTRY_IMAGE/kaniko:debug
     entrypoint: [""]
   parallel:
     matrix:
-      - SERVICE_NAME: [backend, pipeline]
+      - SERVICE_NAME: [backend, pipeline, frontend]
   before_script:
     - mkdir -p "$CI_PROJECT_DIR/.docker"
     - |
@@ -13,26 +13,15 @@ build:backend:
       {"auths": {"${CI_REGISTRY}": {"username": "${CI_REGISTRY_USER}", "password": "${CI_REGISTRY_PASSWORD}"}}}
       JSON
   script:
-    - |
-      /kaniko/executor
-        --context $CI_PROJECT_DIR
+    - /kaniko/executor
+        --context $CI_PROJECT_DIR/$SERVICE_NAME
         --dockerfile $CI_PROJECT_DIR/$SERVICE_NAME/Dockerfile
-        --destination $CI_REGISTRY_IMAGE/$SERVICE_NAME:$CI_COMMIT_TAG
+        --destination $CI_REGISTRY_IMAGE/$SERVICE_NAME:${CI_COMMIT_TAG:-ci-test}
         --cache=true
         --cache-repo=$CI_REGISTRY_IMAGE/kaniko-cache
         --cache-ttl=168h
   rules:
     - if: "$CI_COMMIT_TAG"
-
-build:frontend:
-  stage: build
-  image: $CI_REGISTRY_IMAGE/node:20-alpine
-  script:
-    - cd frontend
-    - npm ci
-    - npm run build
-  rules:
-    - if: "$CI_COMMIT_TAG"
-      when: always
+      # when: always
     - if: $CI_COMMIT_BRANCH == "ci-test"
-      when: always
+      # when: always

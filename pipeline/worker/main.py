@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 from .pipeline import run_segmentation_pipeline
-from .redis_helpers import *
+from .redis_helpers import task_pop, enqueue_result
 
 # Doit correspondre à DATA_DIR/MASK_DIR de backend/main.py — partagé via le
 # volume "shared_data" monté sur /app/data dans les deux conteneurs.
@@ -40,7 +40,9 @@ def main():
             already_preprocessed = task.get("already_preprocessed")
             mask_output_path = _mask_output_path(task_id, mri_path)
             logger.info(f"Traitement de la tâche : {mri_path}")
-            results = run_segmentation_pipeline(mri_path, already_preprocessed, mask_output_path)
+            results = run_segmentation_pipeline(
+                mri_path, already_preprocessed, mask_output_path
+            )
             logger.info(f"Résultats : {results}")
             enqueue_result(task_id, results)
         except Exception as e:

@@ -3,24 +3,23 @@ import json
 from fastapi import File
 
 from src.redis_helpers import enqueue_task, result_pop
-from src.db import Task, TaskUpdate, TaskRepository
+from src.db import TaskUpdate, TaskRepository
 from src.enums import TaskStatus
-from config import UPLOAD_DIR, MASK_DIR, DATABASE_URL
+from config import UPLOAD_DIR, MASK_DIR
+
 
 class TaskService:
     def __init__(self):
         self.task_repository = TaskRepository()
-    
+
     async def save_file(self, file: File, task_id: str):
         # file extension handling
         file_ext = os.path.splitext(file.filename)[1]
         if file.filename.endswith(".nii.gz"):
             file_ext = ".nii.gz"
-            
+
         saved_filename = f"{task_id}{file_ext}"
         saved_file_path = os.path.join(UPLOAD_DIR, saved_filename)
-        mask_filename = f"{task_id}_mask{file_ext}"
-        saved_mask_path = os.path.join(MASK_DIR, mask_filename)
 
         # file saved on drive
         with open(saved_file_path, "wb") as f:
@@ -50,17 +49,17 @@ class TaskService:
         files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(task_id)]
         if not files:
             return -1
-        
+
         return os.path.join(UPLOAD_DIR, files[0])
-    
+
     def get_mask_path(self, task_id: str, task_status: TaskStatus):
         if task_status != TaskStatus.DONE:
             return -2
-    
+
         files = [f for f in os.listdir(MASK_DIR) if f.startswith(task_id)]
         if not files:
             return -1
-        
+
         return os.path.join(MASK_DIR, files[0])
 
     async def get_result(self):

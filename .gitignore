@@ -9,3 +9,4 @@ __pycache__/
 # Backend Runtime Data (Uploads, databases, masks)
 backend/data/
 frontend/tests/
+ssh-ci/
