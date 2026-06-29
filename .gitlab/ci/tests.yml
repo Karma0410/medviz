@@ -1,0 +1,104 @@
+tests:backend:
+  stage: tests
+  image: $CI_REGISTRY_IMAGE/python:3.13-slim
+  services:
+    - name: $CI_REGISTRY_IMAGE/postgres:17-alpine
+  variables:
+    UV_CACHE_DIR: "$CI_PROJECT_DIR/.cache/uv"
+    POSTGRES_DB: medviz
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+  before_script:
+    - apt-get update && apt-get install -y postgresql-client
+    - if [ -d backend ]; then
+        cd backend;
+      else
+        echo "No backend directory" && exit 1;
+      fi
+    - python -m pip install --upgrade pip
+    - pip install uv
+    - until pg_isready -h postgres -p 5432 -U postgres; do
+        echo "Waiting PostgreSQL...";
+        sleep 1;
+      done
+  script:
+    - uv sync
+    - uv run pytest -q
+  cache:
+    key:
+      files:
+        - backend/uv.lock
+    paths:
+      - .cache/uv
+  tags: []
+  allow_failure: false
+  rules:
+    - if: "$CI_COMMIT_TAG"
+      when: always
+    - if: $CI_COMMIT_BRANCH == "ci-test"
+      when: always
+    - changes:
+        - backend/pyproject.toml
+        - backend/**/*.py
+
+tests:pipeline:
+  stage: tests
+  image: $CI_REGISTRY_IMAGE/python:3.13-slim
+  variables:
+    UV_CACHE_DIR: "$CI_PROJECT_DIR/.cache/uv"
+  before_script:
+    - if [ -d pipeline ]; then
+        cd pipeline;
+      else
+        echo "No pipeline directory" && exit 1;
+      fi
+    - python -m pip install --upgrade pip
+    - pip install uv
+  script:
+    - uv sync
+    - uv run pytest -q tests
+  cache:
+    key:
+      files:
+        - pipeline/uv.lock
+    paths:
+      - .cache/uv
+  tags: []
+  allow_failure: false
+  rules:
+    - if: "$CI_COMMIT_TAG"
+    - changes:
+        - pipeline/pyproject.toml
+        - pipeline/**/*.py
+
+tests:frontend:
+  stage: tests
+  image: $CI_REGISTRY_IMAGE/node:20-alpine
+  before_script:
+    - if [ -d frontend ]; then
+        cd frontend;
+      else
+        echo "No frontend directory" && exit 0;
+      fi
+  script:
+    - npm ci --cache .npm
+    - npm run build --if-present
+      # verify build output exists
+    - if [ -d dist ]; then
+        echo "build OK";
+      else
+        echo "No dist directory after build" && exit 1;
+      fi
+      # serve briefly and curl root to ensure frontend starts (uses npx to avoid persistent deps)
+    - npx --yes serve -s dist -l 5000 &>/dev/null
+    - npx --yes wait-on http://localhost:5000 || (echo "frontend-not    responding" && exit 1)
+  cache:
+    paths:
+      - frontend/.npm
+  tags: []
+  allow_failure: false
+  rules:
+    - if: "$CI_COMMIT_TAG"
+    - changes:
+        - frontend/package.json
+        - frontend/**/*.ts*

@@ -1,0 +1,47 @@
+validate:python:
+  stage: validate
+  image: $CI_REGISTRY_IMAGE/python:3.13-slim
+  variables:
+    PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install --no-cache-dir ruff black
+  script:
+    - ruff check .
+    - black --check .
+  cache:
+    paths:
+      - .cache/pip
+  tags: []
+  allow_failure: true
+
+validate:ts:
+  stage: validate
+  image: $CI_REGISTRY_IMAGE/node:20-alpine
+  variables:
+    NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.cache/npm"
+  before_script:
+    - if [ -d frontend ]; then
+        cd frontend;
+      else
+        echo "No frontend directory" && exit 0;
+      fi
+    - npm ci
+  script:
+    - |
+      if [ -f tsconfig.json ]; then
+        npx tsc --noEmit;
+      else
+        echo "No tsconfig.json — skipping tsc";
+      fi
+    - |
+      if [ -f .eslintrc.cjs ] || [ -f .eslintrc.json ] || [ -f .eslintrc ]; then
+        npx eslint src --ext .ts,.tsx --max-warnings=0;
+      else
+        echo "No ESLint config — skipping ESLint";
+      fi
+  cache:
+    paths:
+      - .cache/npm
+  tags: []
+  allow_failure: true
