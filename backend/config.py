@@ -8,5 +8,7 @@ MASK_DIR = os.path.join(DATA_DIR, "masks")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(DATABASE_URL)
+
+
 def init_db():
     SQLModel.metadata.create_all(engine)

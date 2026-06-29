@@ -6,7 +6,7 @@ deploy:
     - apk add --no-cache git openssh
 
     - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
+    - echo "$SSH_PRIVATE_KEY_B64" | base64 -d > ~/.ssh/id_ed25519
     - chmod 600 ~/.ssh/id_ed25519
 
     - ssh-keyscan github.com >> ~/.ssh/known_hosts
@@ -16,7 +16,7 @@ deploy:
 
   script:
     - git remote add github git@github.com:Karma0410/medviz.git || true
-    - git push github main
+    - git push github HEAD:main --force
     - git push github --tags
 
   only:

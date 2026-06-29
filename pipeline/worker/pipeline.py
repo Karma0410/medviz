@@ -52,8 +52,12 @@ def _sitk_to_arr(sitk_img: sitk.Image) -> np.ndarray:
 
 def _load(path: str) -> nib.Nifti1Image:
     img = nib.squeeze_image(nib.load(path))
-    logger.debug("  [load] %s → shape=%s zooms=%s", Path(path).name, img.shape,
-                 img.header.get_zooms()[:3])
+    logger.debug(
+        "  [load] %s → shape=%s zooms=%s",
+        Path(path).name,
+        img.shape,
+        img.header.get_zooms()[:3],
+    )
     return img
 
 
@@ -65,7 +69,8 @@ def _check_atlas_files() -> None:
 
 def _affine_register(fixed: sitk.Image, moving: sitk.Image) -> sitk.Transform:
     initial_tx = sitk.CenteredTransformInitializer(
-        fixed, moving,
+        fixed,
+        moving,
         sitk.AffineTransform(3),
         sitk.CenteredTransformInitializerFilter.GEOMETRY,
     )
@@ -109,8 +114,12 @@ def _atlas_skull_strip(data: np.ndarray, zooms: list[float]) -> np.ndarray:
     transform = _affine_register(fixed, moving)
 
     resampled_mask = sitk.Resample(
-        moving_mask, fixed, transform,
-        sitk.sitkNearestNeighbor, 0.0, moving_mask.GetPixelID(),
+        moving_mask,
+        fixed,
+        transform,
+        sitk.sitkNearestNeighbor,
+        0.0,
+        moving_mask.GetPixelID(),
     )
     return _sitk_to_arr(resampled_mask) > 0.5
 
@@ -143,7 +152,9 @@ def _normalize(data: np.ndarray, mask: np.ndarray) -> np.ndarray:
     return out
 
 
-def preprocess(patient_nib: nib.Nifti1Image, already_preprocessed: bool = False) -> tuple[np.ndarray, np.ndarray]:
+def preprocess(
+    patient_nib: nib.Nifti1Image, already_preprocessed: bool = False
+) -> tuple[np.ndarray, np.ndarray]:
     data = patient_nib.get_fdata(dtype=np.float32)
     zooms = [float(v) for v in patient_nib.header.get_zooms()[:3]]
 
@@ -158,8 +169,9 @@ def preprocess(patient_nib: nib.Nifti1Image, already_preprocessed: bool = False)
         data_stripped = data * brain_mask
         logger.info("    correction N4…")
         sitk_img = _arr_to_sitk(data_stripped, zooms)
-        sitk_mask = sitk.Cast(_arr_to_sitk(brain_mask.astype(np.float32), zooms) > 0.5,
-                              sitk.sitkUInt8)
+        sitk_mask = sitk.Cast(
+            _arr_to_sitk(brain_mask.astype(np.float32), zooms) > 0.5, sitk.sitkUInt8
+        )
         sitk_corrected = _n4_correction(sitk_img, sitk_mask)
         corrected = _sitk_to_arr(sitk_corrected)
         logger.info("    normalisation [0, 1]…")
@@ -191,8 +203,9 @@ def register_to_mni(
     if _is_mni_2mm(patient_norm.shape, patient_zooms):
         logger.info("  patient en MNI 2mm FSL → rééchantillonnage via affines NIfTI")
         patient_norm_nib = nib.Nifti1Image(patient_norm, patient_nib.affine)
-        resampled_nib = nib_resample_from_to(patient_norm_nib, atlas_ref_nib,
-                                              order=1, cval=0.0)
+        resampled_nib = nib_resample_from_to(
+            patient_norm_nib, atlas_ref_nib, order=1, cval=0.0
+        )
         return resampled_nib.get_fdata(dtype=np.float32), ("nib", atlas_ref_nib)
 
     mni_data = mni_nib.get_fdata(dtype=np.float32)
@@ -205,8 +218,12 @@ def register_to_mni(
     transform = _affine_register(fixed, moving)
 
     resampled = sitk.Resample(
-        moving, fixed, transform,
-        sitk.sitkLinear, 0.0, moving.GetPixelID(),
+        moving,
+        fixed,
+        transform,
+        sitk.sitkLinear,
+        0.0,
+        moving.GetPixelID(),
     )
     return _sitk_to_arr(resampled), ("sitk", transform)
 
@@ -230,8 +247,11 @@ def export_mask(
 
     if kind == "nib":
         from nibabel.processing import resample_from_to as nib_resample_from_to
+
         atlas_ref_nib = payload
-        mask_nib = nib.Nifti1Image(mni_space_mask.astype(np.float32), atlas_ref_nib.affine)
+        mask_nib = nib.Nifti1Image(
+            mni_space_mask.astype(np.float32), atlas_ref_nib.affine
+        )
         native_nib = nib_resample_from_to(mask_nib, patient_nib, order=0, cval=0.0)
         return np.round(native_nib.get_fdata()).astype(np.uint8), patient_nib.affine
 
@@ -247,17 +267,24 @@ def apply_atlas(
     atlas_mask = atlas_data >= threshold
 
     if patient_registered.shape != atlas_mask.shape:
-        logger.warning("  shape mismatch patient %s vs atlas %s — zoom correctif",
-                       patient_registered.shape, atlas_mask.shape)
+        logger.warning(
+            "  shape mismatch patient %s vs atlas %s — zoom correctif",
+            patient_registered.shape,
+            atlas_mask.shape,
+        )
         factors = [atlas_mask.shape[i] / patient_registered.shape[i] for i in range(3)]
         patient_registered = zoom(patient_registered, factors, order=1)
 
     coords = np.where(atlas_mask)
     if coords[0].size == 0:
-        raise ValueError("Masque atlas vide après seuillage — vérifier le fichier atlas.")
+        raise ValueError(
+            "Masque atlas vide après seuillage — vérifier le fichier atlas."
+        )
 
     mins = [max(0, c.min() - padding) for c in coords]
-    maxs = [min(atlas_mask.shape[i], c.max() + padding + 1) for i, c in enumerate(coords)]
+    maxs = [
+        min(atlas_mask.shape[i], c.max() + padding + 1) for i, c in enumerate(coords)
+    ]
     slices = tuple(slice(mins[i], maxs[i]) for i in range(3))
 
     return patient_registered[slices], atlas_mask[slices], slices
@@ -275,9 +302,12 @@ def fine_segment(
     if masked_vals.size == 0:
         return np.zeros_like(roi_atlas_mask, dtype=np.uint8)
 
-    logger.debug("    intensités ROI : min=%.3f  médiane=%.3f  max=%.3f",
-                 float(masked_vals.min()), float(np.median(masked_vals)),
-                 float(masked_vals.max()))
+    logger.debug(
+        "    intensités ROI : min=%.3f  médiane=%.3f  max=%.3f",
+        float(masked_vals.min()),
+        float(np.median(masked_vals)),
+        float(masked_vals.max()),
+    )
 
     intensity_mask = (smoothed >= low) & (smoothed <= high)
     combined = intensity_mask & roi_atlas_mask
@@ -301,7 +331,9 @@ def asymmetry_index(vol_l: float, vol_r: float) -> float:
 
 
 def classify(volume_cm3: float, age: int | None = None) -> str:
-    cn_min, mci_min = _REF_75_AND_OVER if (age is not None and age >= 75) else _REF_UNDER_75
+    cn_min, mci_min = (
+        _REF_75_AND_OVER if (age is not None and age >= 75) else _REF_UNDER_75
+    )
     if volume_cm3 >= cn_min:
         return "CN (Cognitively Normal)"
     if volume_cm3 >= mci_min:
@@ -311,7 +343,9 @@ def classify(volume_cm3: float, age: int | None = None) -> str:
 
 def classify_by_ratio(hippo_ratio_pct: float, age: int | None = None) -> str:
     cn_min, mci_min = (
-        _REF_RATIO_75_AND_OVER if (age is not None and age >= 75) else _REF_RATIO_UNDER_75
+        _REF_RATIO_75_AND_OVER
+        if (age is not None and age >= 75)
+        else _REF_RATIO_UNDER_75
     )
     if hippo_ratio_pct >= cn_min:
         return "CN (Cognitively Normal)"
@@ -335,7 +369,9 @@ def iou_score(pred: np.ndarray, ref: np.ndarray) -> float:
     return float(inter / (union + 1e-8))
 
 
-def hausdorff_distance_95(pred: np.ndarray, ref: np.ndarray, voxel_zooms: tuple) -> float:
+def hausdorff_distance_95(
+    pred: np.ndarray, ref: np.ndarray, voxel_zooms: tuple
+) -> float:
     pred_b = pred.astype(bool)
     ref_b = ref.astype(bool)
     if pred_b.sum() == 0 or ref_b.sum() == 0:
@@ -368,7 +404,10 @@ def run_segmentation_pipeline(
     raw = patient_nib.get_fdata(dtype=np.float32)
     logger.info(
         "  shape=%s  voxel=%.2f×%.2f×%.2f mm  intensités=[%.0f, %.0f]",
-        patient_nib.shape, *patient_zooms, raw.min(), raw.max(),
+        patient_nib.shape,
+        *patient_zooms,
+        raw.min(),
+        raw.max(),
     )
 
     logger.info("[2/8] Prétraitement")
@@ -377,13 +416,17 @@ def run_segmentation_pipeline(
     if already_preprocessed:
         logger.info("  fichier déjà prétraité (skull-stripping + N4) → étapes skippées")
     else:
-        logger.info("  IRM brute détectée → skull-stripping + N4 + normalisation complets")
+        logger.info(
+            "  IRM brute détectée → skull-stripping + N4 + normalisation complets"
+        )
     patient_norm, brain_mask = preprocess(patient_nib, already_preprocessed)
     brain_volume_cm3 = compute_volume_cm3(brain_mask, tuple(patient_zooms))
     logger.info("  volume cérébral total : %.1f cm³", brain_volume_cm3)
 
     logger.info("[3/8] Recalage affine → espace MNI  (quelques minutes…)")
-    patient_registered, inverse_info = register_to_mni(patient_norm, patient_nib, atlas_L_nib, mni_nib)
+    patient_registered, inverse_info = register_to_mni(
+        patient_norm, patient_nib, atlas_L_nib, mni_nib
+    )
     logger.info("  shape recalée : %s", patient_registered.shape)
 
     logger.info("[4/8] Application de l'atlas HarP")
@@ -397,7 +440,8 @@ def run_segmentation_pipeline(
 
     logger.info("[5/8] Segmentation fine dans les ROIs")
     seg_low, seg_high = (
-        (INTENSITY_LOW, INTENSITY_HIGH) if already_preprocessed
+        (INTENSITY_LOW, INTENSITY_HIGH)
+        if already_preprocessed
         else (INTENSITY_LOW_RAW, INTENSITY_HIGH_RAW)
     )
     mask_L = fine_segment(roi_L, atlas_mask_L, seg_low, seg_high)
@@ -436,7 +480,9 @@ def run_segmentation_pipeline(
     mni_space_mask[slices_L][mask_L.astype(bool)] = 1
     mni_space_mask[slices_R][mask_R.astype(bool)] = 2
 
-    mask_data, mask_affine = export_mask(mni_space_mask, inverse_info, patient_nib, mni_nib)
+    mask_data, mask_affine = export_mask(
+        mni_space_mask, inverse_info, patient_nib, mni_nib
+    )
     mask_space = "natif" if inverse_info[0] == "nib" else "MNI"
 
     if mask_output_path is None:
@@ -449,7 +495,11 @@ def run_segmentation_pipeline(
     mask_nib_out = nib.Nifti1Image(mask_data, mask_affine)
     mask_nib_out.header.set_data_dtype(np.uint8)
     mask_nib_out.to_filename(mask_output_path)
-    logger.info("  masque enregistré (espace %s) : %s  (1=gauche, 2=droit)", mask_space, mask_output_path)
+    logger.info(
+        "  masque enregistré (espace %s) : %s  (1=gauche, 2=droit)",
+        mask_space,
+        mask_output_path,
+    )
 
     asym_note = f"  ⚠ Asymétrie significative : {ai:.1f} %" if ai > 10.0 else ""
     status_text = (

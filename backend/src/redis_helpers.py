@@ -28,4 +28,6 @@ async def result_pop():
 
 
 async def enqueue_task(task_id: str, mri_path: str):
-    await redis_client.rpush("tasks", json.dumps({"task_id": task_id, "mri_path": mri_path }))
+    await redis_client.rpush(
+        "tasks", json.dumps({"task_id": task_id, "mri_path": mri_path})
+    )
