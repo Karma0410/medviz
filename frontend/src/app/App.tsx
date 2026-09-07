@@ -9,7 +9,7 @@ import { Brain, FileText, HelpCircle, Upload, Download, Info, Activity, ChevronD
 import { Language, translations } from './translations';
 import { exportReportAsPDF, generateClinicalInterpretation, AnalysisData } from './reportGenerator';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 enum TaskStatus {
   STARTED = 0,

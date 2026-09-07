@@ -4,13 +4,11 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 import json
 from urllib.parse import urlparse
 
-_redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-_parsed = urlparse(_redis_url)
-redis_client = redis.Redis(
-    host=_parsed.hostname,
-    port=_parsed.port or 6379,
-    db=int(_parsed.path.lstrip("/") or 0),
-)
+_redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0").strip()
+if not _redis_url.startswith("redis://") and not _redis_url.startswith("rediss://"):
+    _redis_url = f"redis://{_redis_url}:6379"
+
+redis_client = redis.from_url(_redis_url)
 
 
 def task_pop():
